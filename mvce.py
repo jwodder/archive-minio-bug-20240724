@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 from time import sleep
 from dandi.consts import DandiInstance, known_instances
 from dandi.dandiapi import DandiAPIClient, RESTFullAPIClient
@@ -58,7 +59,9 @@ def main() -> None:
     # )
     ENTRIES_ONE = [Entry.make("foo", b"This is foo.\n")]
     ENTRIES_TWO = [Entry.make("foo/bar", b"This is foo/bar.\n")]
-    with docker_archive() as archive, DandiAPIClient.for_dandi_instance(
+    with docker_archive(
+        quiet=sys.argv[1:] in (["-q"], ["--quiet"])
+    ) as archive, DandiAPIClient.for_dandi_instance(
         archive.instance, token=archive.api_token
     ) as client:
 
@@ -137,18 +140,27 @@ def list_entries(client: DandiAPIClient, zarr_id: str, expected: list[Entry]) ->
 
 
 @contextmanager
-def docker_archive() -> Iterator[Archive]:
+def docker_archive(quiet: bool) -> Iterator[Archive]:
+    print("Spinning up Dockerized Archive instance ...")
+    if quiet:
+        kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    else:
+        kwargs = {}
     env = {**os.environ, "DJANGO_DANDI_SCHEMA_VERSION": DANDI_SCHEMA_VERSION}
     try:
         if os.environ.get("DANDI_TESTS_PULL_DOCKER_COMPOSE", "1") not in ("", "0"):
             subprocess.run(
-                ["docker", "compose", "pull"], cwd=LOCAL_DOCKER_DIR, check=True
+                ["docker", "compose", "pull"],
+                cwd=LOCAL_DOCKER_DIR,
+                check=True,
+                **kwargs,
             )
         subprocess.run(
             ["docker", "compose", "run", "--rm", "createbuckets"],
             cwd=LOCAL_DOCKER_DIR,
             env=env,
             check=True,
+            **kwargs,
         )
         subprocess.run(
             [
@@ -163,6 +175,7 @@ def docker_archive() -> Iterator[Archive]:
             cwd=LOCAL_DOCKER_DIR,
             env=env,
             check=True,
+            **kwargs,
         )
         subprocess.run(
             [
@@ -177,6 +190,7 @@ def docker_archive() -> Iterator[Archive]:
             cwd=LOCAL_DOCKER_DIR,
             env=env,
             check=True,
+            **kwargs,
         )
         subprocess.run(
             [
@@ -196,6 +210,7 @@ def docker_archive() -> Iterator[Archive]:
             cwd=LOCAL_DOCKER_DIR,
             env=env,
             check=True,
+            **kwargs,
         )
         r = subprocess.check_output(
             [
@@ -212,6 +227,7 @@ def docker_archive() -> Iterator[Archive]:
             cwd=LOCAL_DOCKER_DIR,
             env=env,
             text=True,
+            stderr=subprocess.DEVNULL if quiet else None,
         )
         m = re.search(r"^Generated token (\w+) for user admin@nil.nil$", r, flags=re.M)
         if not m:
@@ -226,6 +242,7 @@ def docker_archive() -> Iterator[Archive]:
             cwd=str(LOCAL_DOCKER_DIR),
             env=env,
             check=True,
+            **kwargs,
         )
         for _ in range(25):
             try:
@@ -239,8 +256,12 @@ def docker_archive() -> Iterator[Archive]:
         os.environ["DANDI_API_KEY"] = django_api_key  # For uploading
         yield Archive(instance=instance, api_token=django_api_key)
     finally:
+        print("Tearing down Dockerized Archive instance ...")
         subprocess.run(
-            ["docker", "compose", "down", "-v"], cwd=LOCAL_DOCKER_DIR, check=True
+            ["docker", "compose", "down", "-v"],
+            cwd=LOCAL_DOCKER_DIR,
+            check=True,
+            **kwargs,
         )
 
 
