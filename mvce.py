@@ -61,6 +61,8 @@ def main() -> None:
     with docker_archive() as archive, DandiAPIClient.for_dandi_instance(
         archive.instance, token=archive.api_token
     ) as client:
+
+        print("Creating Dandiset ...")
         d = client.create_dandiset(
             "Test Dandiset",
             {
@@ -78,6 +80,8 @@ def main() -> None:
             },
         )
         dandiset_id = d.identifier
+
+        print("Creating Zarr ...")
         zarr_id = client.post(
             "/zarr/", json={"name": "conflicted.zarr", "dandiset": dandiset_id}
         )["zarr_id"]
@@ -91,14 +95,15 @@ def main() -> None:
                 "zarr_id": zarr_id,
             },
         )
+
         upload(client, zarr_id, ENTRIES_ONE)
-        list_entries(client, zarr_id)
+        list_entries(client, zarr_id, expected=ENTRIES_ONE)
         print("Deleting all entries from Zarr")
         client.delete(
             f"/zarr/{zarr_id}/files/", json=[{"path": e.path} for e in ENTRIES_ONE]
         )
         upload(client, zarr_id, ENTRIES_TWO)
-        list_entries(client, zarr_id)
+        list_entries(client, zarr_id, expected=ENTRIES_TWO)
 
 
 def upload(client: DandiAPIClient, zarr_id: str, entries: list[Entry]) -> None:
@@ -111,6 +116,7 @@ def upload(client: DandiAPIClient, zarr_id: str, entries: list[Entry]) -> None:
     ) as storage:
         for signed_url, e in zip(r, entries):
             try:
+                print(f"Uploading {e.path} to S3 backend ...")
                 storage.put(
                     signed_url,
                     data=e.blob,
@@ -122,11 +128,12 @@ def upload(client: DandiAPIClient, zarr_id: str, entries: list[Entry]) -> None:
     client.post(f"/zarr/{zarr_id}/finalize/")
 
 
-def list_entries(client: DandiAPIClient, zarr_id: str) -> None:
+def list_entries(client: DandiAPIClient, zarr_id: str, expected: list[Entry]) -> None:
     print(
         "Files in Zarr, per Archive:",
         [e["Key"] for e in client.paginate(f"/zarr/{zarr_id}/files/")],
     )
+    print("  Expected files:", [e.path for e in expected])
 
 
 @contextmanager
